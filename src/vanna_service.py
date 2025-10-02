@@ -5,6 +5,7 @@ import clickhouse_connect
 from vanna.qdrant import Qdrant_VectorStore
 from qdrant_client import QdrantClient
 from dotenv import load_dotenv
+from database_prompts import DATABASE_PROMPTS
 
 # Load environment variables
 load_dotenv()
@@ -14,6 +15,9 @@ class VannaQdrantClickHouse(Qdrant_VectorStore):
     """Custom Vanna implementation using Qdrant for vector storage and ClickHouse for database"""
     
     def __init__(self, config=None):
+        # Store database configuration
+        self.database_type = config.get('database_type', 'clickhouse') if config else 'clickhouse'
+        
         # Initialize Qdrant vector store
         if config and 'qdrant_client' in config:
             qdrant_config = {'client': config['qdrant_client']}
@@ -62,45 +66,45 @@ class VannaQdrantClickHouse(Qdrant_VectorStore):
         try:
             model = kwargs.get('model', self.qwen_model)
             
-            # Debug logging
-            print(f"DEBUG: submit_prompt called with type: {type(prompt)}")
+            # Get database-specific system prompt
+            db_config = DATABASE_PROMPTS.get(self.database_type, DATABASE_PROMPTS['clickhouse'])
+            system_prompt = db_config['system_prompt']
+            table_context = db_config.get('table_context', '')
+            
+            # Build enhanced system prompt with table context
+            full_system_prompt = f"{system_prompt}\n\n{table_context}".strip()
             
             # Handle different prompt formats from Vanna
             if isinstance(prompt, list):
-                # Vanna is passing a list of messages directly
                 messages = []
+                has_system = False
+                
                 for msg in prompt:
-                    if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
-                        # Ensure content is a string
-                        content = msg['content']
-                        if not isinstance(content, str):
-                            content = str(content)
+                    if isinstance(msg, dict) and msg.get('role') == 'system':
+                        has_system = True
+                        # Replace system message with our enhanced one
+                        messages.append({"role": "system", "content": full_system_prompt})
+                    elif isinstance(msg, dict) and 'role' in msg and 'content' in msg:
                         messages.append({
                             "role": msg['role'],
-                            "content": content
+                            "content": str(msg['content'])
                         })
                     else:
-                        # Fallback for unexpected format
-                        messages.append({
-                            "role": "user",
-                            "content": str(msg)
-                        })
+                        messages.append({"role": "user", "content": str(msg)})
+                
+                if not has_system:
+                    messages.insert(0, {"role": "system", "content": full_system_prompt})
+                    
             elif isinstance(prompt, str):
-                # Simple string prompt
                 messages = [
-                    {"role": "system", "content": "You are a helpful assistant that generates SQL queries. Always respond with valid SQL syntax."},
+                    {"role": "system", "content": full_system_prompt},
                     {"role": "user", "content": prompt}
                 ]
             else:
-                # Fallback: convert to string
                 messages = [
-                    {"role": "system", "content": "You are a helpful assistant that generates SQL queries. Always respond with valid SQL syntax."},
+                    {"role": "system", "content": full_system_prompt},
                     {"role": "user", "content": str(prompt)}
                 ]
-            
-            print(f"DEBUG: Final messages to API (count: {len(messages)})")
-            for i, msg in enumerate(messages):
-                print(f"   {i}: {msg['role']} - {msg['content'][:100]}...")
             
             response = self.qwen_client.chat.completions.create(
                 model=model,
@@ -109,21 +113,11 @@ class VannaQdrantClickHouse(Qdrant_VectorStore):
                 temperature=kwargs.get('temperature', 0.1)
             )
             
-            # Ensure we get a string response
             result = response.choices[0].message.content
-            if not isinstance(result, str):
-                result = str(result)
-            
-            print(f"DEBUG: Qwen API response: {result[:100]}...")
-            return result
+            return str(result) if result else ""
             
         except Exception as e:
-            print(f"DEBUG: Qwen API call failed with error: {e}")
-            # Return a more specific error message
-            error_msg = str(e)
-            if "Error code: 400" in error_msg and "missing_required_parameter" in error_msg:
-                print("DEBUG: This appears to be a message format issue with Qwen API")
-            raise Exception(f"Qwen API error: {error_msg}")
+            raise Exception(f"Qwen API error: {str(e)}")
     
     def system_message(self, message: str) -> Dict[str, str]:
         """Format system message for the chat API"""
@@ -140,6 +134,12 @@ class VannaQdrantClickHouse(Qdrant_VectorStore):
 
 class VannaService:
     def __init__(self, database_config: Optional[Dict[str, Any]] = None):
+        # Get database type from environment
+        self.database_type = os.getenv('DATABASE_TYPE', 'clickhouse').lower()
+        
+        if self.database_type not in DATABASE_PROMPTS:
+            raise ValueError(f"Unsupported database type: {self.database_type}. Supported types: {list(DATABASE_PROMPTS.keys())}")
+        
         # Database configuration
         if database_config:
             self.db_config = database_config
@@ -153,7 +153,8 @@ class VannaService:
             }
         
         # Initialize Vanna with Qdrant and custom LLM
-        self.vn = VannaQdrantClickHouse()
+        vanna_config = {'database_type': self.database_type}
+        self.vn = VannaQdrantClickHouse(config=vanna_config)
         
         # Connect to ClickHouse
         self._connect_to_clickhouse()
@@ -196,14 +197,9 @@ class VannaService:
         """Generate SQL from natural language question"""
         try:
             sql = self.vn.generate_sql(question)
-            # Ensure the result is always a string
-            if not isinstance(sql, str):
-                sql = str(sql)
-            return sql
+            return str(sql) if sql else ""
         except Exception as e:
-            error_msg = str(e)
-            print(f"DEBUG: generate_sql failed with error: {error_msg}")
-            raise Exception(f"Failed to generate SQL: {error_msg}")
+            raise Exception(f"Failed to generate SQL: {str(e)}")
     
     def run_sql(self, sql: str) -> Dict[str, Any]:
         """Execute SQL and return results"""
@@ -395,3 +391,33 @@ class VannaService:
         self.db_config = database_config
         self._connect_to_clickhouse()
         return {"status": "success", "message": "Database configuration updated"}
+    
+    def set_database_type(self, database_type: str):
+        """Change the database type and update the context"""
+        database_type = database_type.lower()
+        
+        if database_type not in DATABASE_PROMPTS:
+            raise ValueError(f"Unsupported database type: {database_type}. Supported types: {list(DATABASE_PROMPTS.keys())}")
+        
+        self.database_type = database_type
+        self.vn.database_type = database_type
+        
+        return {
+            "status": "success", 
+            "message": f"Database type changed to {database_type}",
+            "database_type": database_type
+        }
+    
+    def get_database_type(self):
+        """Get current database type and available types"""
+        return {
+            "current_database_type": self.database_type,
+            "available_types": list(DATABASE_PROMPTS.keys())
+        }
+    
+    def get_database_contexts(self):
+        """Get all available database contexts"""
+        return {
+            "database_contexts": DATABASE_PROMPTS,
+            "current_type": self.database_type
+        }
