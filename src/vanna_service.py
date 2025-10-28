@@ -5,7 +5,7 @@ import clickhouse_connect
 from vanna.qdrant import Qdrant_VectorStore
 from qdrant_client import QdrantClient
 from dotenv import load_dotenv
-from database_prompts import DATABASE_PROMPTS
+from src.database_prompts import DATABASE_PROMPTS
 
 # Load environment variables
 load_dotenv()
@@ -196,7 +196,7 @@ class VannaService:
     def generate_sql(self, question: str) -> str:
         """Generate SQL from natural language question"""
         try:
-            sql = self.vn.generate_sql(question)
+            sql = self.vn.generate_sql(question, True)
             return str(sql) if sql else ""
         except Exception as e:
             raise Exception(f"Failed to generate SQL: {str(e)}")

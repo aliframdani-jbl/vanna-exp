@@ -12,6 +12,7 @@ class DatabaseConfig(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    tenant_id: Optional[str] = None
     database_config: Optional[DatabaseConfig] = None
 
 
@@ -26,3 +27,4 @@ class TrainingRequest(BaseModel):
     documentation: Optional[str] = None
     sql: Optional[List[str]] = None
     question: Optional[List[str]] = None
+    

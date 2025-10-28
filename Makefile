@@ -11,7 +11,7 @@ help:
 	@echo "  clean      - Clean up temporary files"
 
 install:
-	pip install -r requirements.txt
+	pip3 install -r requirements.txt
 
 setup:
 	cp .env.example .env
@@ -19,10 +19,10 @@ setup:
 	docker-compose up -d
 
 start:
-	python main.py
+	python3 main.py
 
 test:
-	python tests/test_simple_fix.py
+	python3 tests/test_simple_fix.py
 
 clean:
 	rm -rf __pycache__/
