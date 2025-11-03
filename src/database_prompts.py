@@ -4,7 +4,7 @@ Database-specific prompts for different SQL dialects
 
 DATABASE_PROMPTS = {
     'clickhouse': {
-        'system_prompt': """You are a ClickHouse SQL expert. Generate ONLY valid ClickHouse SQL queries.
+        'system_prompt': """You are a ClickHouse SQL expert. Generate ONLY valid ClickHouse SQL queries. You MUST only use columns from the provided DDL. If you cannot answer, reply with 'Cannot answer.'
 NEVER use made-up columns.
 
 Return ONLY the SQL query, no explanations.""",

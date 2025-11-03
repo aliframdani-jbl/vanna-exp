@@ -30,15 +30,32 @@ def get_text2sql_router(vanna_service):
             print("DEBUG: Ask question result:")   
             print(result)
             
+            # Handle error case
+            if 'error' in result:
+                return QueryResponse(
+                    sql=result.get('sql', ''),
+                    error=result['error'],
+                    results=None
+                )
+            
+            # Handle success case
+            results_data = result.get('results')
+            if results_data and 'data' in results_data:
+                # Convert the results format to list of dictionaries
+                results_list = results_data['data']
+            else:
+                results_list = None
+                
             return QueryResponse(
-                sql=result['sql'],
-                results=[result['results']]
+                sql=result.get('sql', ''),
+                results=results_list
             )
         
         except Exception as e:
             return QueryResponse(
                 sql="",
-                error=str(e)
+                error=str(e),
+                results=None
             )
 
 
